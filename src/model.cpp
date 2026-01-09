@@ -129,21 +129,10 @@ void Model::attention(int layer, int seq_len, int start_pos) {
                                 cudaMemcpyDeviceToDevice, stream));
     cache.current_len = kv_len;
 
-    // Attention using strided GEMM - works directly with [seq, heads, dim] layout
-    // No transpose needed! Q, K, V stay in their natural layout.
-
-    // Q[seq,heads,dim] @ K[kv_len,heads,dim]^T -> scores[heads,seq,kv_len]
-    // Scale by 1/sqrt(d_k) is fused into the GEMM
+    // Flash Attention: fused Q@K^T + causal mask + softmax + @V (single kernel)
     float scale = 1.0f / sqrtf((float)HEAD_DIM);
-    gemm_qk_strided(scratch.scores.data, scratch.q.data, cache.k_cache.data,
-                    seq_len, kv_len, N_HEAD, HEAD_DIM, scale, stream);
-
-    // Fused causal mask + softmax (1 kernel instead of 2)
-    causal_softmax_bf16(scratch.scores_softmax.data, scratch.scores.data, N_HEAD, seq_len, kv_len, start_pos, stream);
-
-    // scores[heads,seq,kv_len] @ V[kv_len,heads,dim] -> attn_out[seq,heads,dim]
-    gemm_sv_strided(scratch.attn_out.data, scratch.scores_softmax.data, cache.v_cache.data,
-                    seq_len, kv_len, N_HEAD, HEAD_DIM, stream);
+    flash_attention(scratch.attn_out.data, scratch.q.data, cache.k_cache.data, cache.v_cache.data,
+                    seq_len, kv_len, N_HEAD, scale, start_pos, stream);
 
     // Output projection + residual (fused)
     gemm_half_residual(scratch.x.data, scratch.attn_out.data, l.o_weight.data, scratch.x.data, seq_len, N_EMBD, N_EMBD, stream);

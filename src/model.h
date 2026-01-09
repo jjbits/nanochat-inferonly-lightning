@@ -31,6 +31,10 @@ void softmax_bf16(nv_bfloat16* out, const nv_bfloat16* x, int rows, int cols, cu
 void apply_causal_mask_bf16(nv_bfloat16* scores, int heads, int rows, int cols, int offset, cudaStream_t stream);
 void causal_softmax_bf16(nv_bfloat16* out, const nv_bfloat16* scores, int heads, int seq_q, int kv_len, int offset, cudaStream_t stream);
 
+// Flash Attention: fused Q@K^T + causal mask + softmax + @V
+void flash_attention(nv_bfloat16* out, const nv_bfloat16* Q, const nv_bfloat16* K, const nv_bfloat16* V,
+                     int seq_q, int kv_len, int heads, float scale, int kv_offset, cudaStream_t stream);
+
 // Single transformer layer weights (RMSNorm is parameter-free)
 struct LayerWeights {
     Tensor<nv_bfloat16> q_weight;        // [n_embd, n_embd]

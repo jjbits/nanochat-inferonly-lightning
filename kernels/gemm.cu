@@ -30,6 +30,7 @@ using GemmBf16 = cutlass::gemm::device::GemmUniversal<
 >;
 
 static GemmBf16 gemm_bf16_op;
+static GemmBf16 gemm_bf16_residual_op;
 
 // C[M,N] = A[M,K] @ B[N,K]^T (bf16 precision)
 void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M, int N, int K, cudaStream_t stream) {
@@ -55,6 +56,34 @@ void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M
     cutlass::Status status = gemm_bf16_op(args, nullptr, stream);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "CUTLASS GEMM bf16 failed\n");
+    }
+}
+
+// D[M,N] = A[M,K] @ B[N,K]^T + residual[M,N] (fused residual add)
+void gemm_half_residual(nv_bfloat16* D, const nv_bfloat16* A, const nv_bfloat16* B,
+                        const nv_bfloat16* residual, int M, int N, int K, cudaStream_t stream) {
+    typename GemmBf16::Arguments args(
+        cutlass::gemm::GemmUniversalMode::kGemm,
+        {M, N, K},
+        1,  // batch count
+        {1.0f, 1.0f},  // alpha=1, beta=1: D = 1*A@B^T + 1*residual
+        reinterpret_cast<const cutlass::bfloat16_t*>(A),
+        reinterpret_cast<const cutlass::bfloat16_t*>(B),
+        reinterpret_cast<const cutlass::bfloat16_t*>(residual),  // C = residual (read)
+        reinterpret_cast<cutlass::bfloat16_t*>(D),               // D = output (write)
+        M * K,  // batch stride A
+        N * K,  // batch stride B
+        M * N,  // batch stride C
+        M * N,  // batch stride D
+        K,      // lda
+        K,      // ldb
+        N,      // ldc
+        N       // ldd
+    );
+
+    cutlass::Status status = gemm_bf16_residual_op(args, nullptr, stream);
+    if (status != cutlass::Status::kSuccess) {
+        fprintf(stderr, "CUTLASS GEMM bf16 residual failed\n");
     }
 }
 

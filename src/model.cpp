@@ -114,11 +114,9 @@ void Model::attention(int layer, int seq_len, int start_pos) {
     gemm_half(scratch.k.data, scratch.x_norm.data, l.k_weight.data, seq_len, N_EMBD, N_EMBD, stream);
     gemm_half(scratch.v.data, scratch.x_norm.data, l.v_weight.data, seq_len, N_EMBD, N_EMBD, stream);
 
-    // RoPE then QK-norm
-    apply_rope(scratch.q.data, seq_len, N_HEAD, start_pos, stream);
-    apply_rope(scratch.k.data, seq_len, N_KV_HEAD, start_pos, stream);
-    rmsnorm(scratch.q.data, scratch.q.data, seq_len * N_HEAD, HEAD_DIM, stream);
-    rmsnorm(scratch.k.data, scratch.k.data, seq_len * N_KV_HEAD, HEAD_DIM, stream);
+    // Fused RoPE + QK-norm (2 kernels instead of 4)
+    apply_rope_rmsnorm(scratch.q.data, seq_len, N_HEAD, start_pos, stream);
+    apply_rope_rmsnorm(scratch.k.data, seq_len, N_KV_HEAD, start_pos, stream);
 
     // Append to KV cache
     nv_bfloat16* k_cache_pos = cache.k_cache.data + start_pos * N_KV_HEAD * HEAD_DIM;
@@ -140,21 +138,15 @@ void Model::attention(int layer, int seq_len, int start_pos) {
     gemm_qk_strided(scratch.scores.data, scratch.q.data, cache.k_cache.data,
                     seq_len, kv_len, N_HEAD, HEAD_DIM, scale, stream);
 
-    // Causal masking - all heads in one kernel
-    apply_causal_mask_bf16(scratch.scores.data, N_HEAD, seq_len, kv_len, start_pos, stream);
-
-    // Softmax in bf16 (internal fp32 for stability)
-    softmax_bf16(scratch.scores_softmax.data, scratch.scores.data, N_HEAD * seq_len, kv_len, stream);
+    // Fused causal mask + softmax (1 kernel instead of 2)
+    causal_softmax_bf16(scratch.scores_softmax.data, scratch.scores.data, N_HEAD, seq_len, kv_len, start_pos, stream);
 
     // scores[heads,seq,kv_len] @ V[kv_len,heads,dim] -> attn_out[seq,heads,dim]
     gemm_sv_strided(scratch.attn_out.data, scratch.scores_softmax.data, cache.v_cache.data,
                     seq_len, kv_len, N_HEAD, HEAD_DIM, stream);
 
-    // Output projection
-    gemm_half(scratch.x_norm.data, scratch.attn_out.data, l.o_weight.data, seq_len, N_EMBD, N_EMBD, stream);
-
-    // Residual add
-    residual_add(scratch.x.data, scratch.x.data, scratch.x_norm.data, seq_len * N_EMBD, stream);
+    // Output projection + residual (fused)
+    gemm_half_residual(scratch.x.data, scratch.attn_out.data, l.o_weight.data, scratch.x.data, seq_len, N_EMBD, N_EMBD, stream);
 }
 
 void Model::mlp(int layer, int seq_len) {
@@ -167,10 +159,8 @@ void Model::mlp(int layer, int seq_len) {
     gemm_half(scratch.mlp_hidden.data, scratch.x_norm.data, l.mlp_up_weight.data, seq_len, MLP_HIDDEN, N_EMBD, stream);
     relu_squared(scratch.mlp_hidden.data, seq_len * MLP_HIDDEN, stream);
 
-    // Down projection: x[seq,mlp_hidden] @ W[n_embd,mlp_hidden]^T = out[seq,n_embd]
-    gemm_half(scratch.mlp_out.data, scratch.mlp_hidden.data, l.mlp_down_weight.data, seq_len, N_EMBD, MLP_HIDDEN, stream);
-
-    residual_add(scratch.x.data, scratch.x.data, scratch.mlp_out.data, seq_len * N_EMBD, stream);
+    // Down projection + residual (fused)
+    gemm_half_residual(scratch.x.data, scratch.mlp_hidden.data, l.mlp_down_weight.data, scratch.x.data, seq_len, N_EMBD, MLP_HIDDEN, stream);
 }
 
 void Model::forward(const int* tokens, int seq_len, int start_pos, nv_bfloat16* logits_out) {

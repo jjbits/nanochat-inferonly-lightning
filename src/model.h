@@ -12,6 +12,7 @@ namespace nanochat {
 // Kernel function declarations
 void rmsnorm(nv_bfloat16* out, const nv_bfloat16* x, int rows, int cols, cudaStream_t stream);
 void apply_rope(nv_bfloat16* x, int seq_len, int n_heads, int start_pos, cudaStream_t stream);
+void apply_rope_rmsnorm(nv_bfloat16* x, int seq_len, int n_heads, int start_pos, cudaStream_t stream);
 void init_rope_tables();
 void embedding(nv_bfloat16* out, const nv_bfloat16* weight, const int* tokens, int seq_len, int n_embd, cudaStream_t stream);
 void relu_squared(nv_bfloat16* x, int n, cudaStream_t stream);
@@ -19,6 +20,7 @@ void tanh_cap(nv_bfloat16* x, int n, float cap, cudaStream_t stream);
 void residual_add(nv_bfloat16* out, const nv_bfloat16* a, const nv_bfloat16* b, int n, cudaStream_t stream);
 // CUTLASS GEMM functions
 void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M, int N, int K, cudaStream_t stream);
+void gemm_half_residual(nv_bfloat16* D, const nv_bfloat16* A, const nv_bfloat16* B, const nv_bfloat16* residual, int M, int N, int K, cudaStream_t stream);
 
 // Strided attention GEMMs - work directly with [seq, heads, dim] layout, no transpose needed
 void gemm_qk_strided(nv_bfloat16* scores, const nv_bfloat16* Q, const nv_bfloat16* K, int seq_q, int seq_k, int heads, int dim, float scale, cudaStream_t stream);
@@ -27,6 +29,7 @@ void gemm_sv_strided(nv_bfloat16* out, const nv_bfloat16* scores, const nv_bfloa
 // bf16 attention ops (all heads in one kernel)
 void softmax_bf16(nv_bfloat16* out, const nv_bfloat16* x, int rows, int cols, cudaStream_t stream);
 void apply_causal_mask_bf16(nv_bfloat16* scores, int heads, int rows, int cols, int offset, cudaStream_t stream);
+void causal_softmax_bf16(nv_bfloat16* out, const nv_bfloat16* scores, int heads, int seq_q, int kv_len, int offset, cudaStream_t stream);
 
 // Single transformer layer weights (RMSNorm is parameter-free)
 struct LayerWeights {

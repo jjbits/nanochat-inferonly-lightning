@@ -21,15 +21,15 @@ from pydantic import BaseModel
 from typing import List, Optional, AsyncGenerator
 
 # Add parent nanochat-inferonly to path for tokenizer
-sys.path.insert(0, str(Path(__file__).parent.parent / "nanochat-inferonly"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "nanochat-inferonly"))
 from tokenizer import Tokenizer
 
 parser = argparse.ArgumentParser(description='NanoChat Lightning Web Server')
 parser.add_argument('--port', type=int, default=8000, help='Port to run server on')
 parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind to')
-parser.add_argument('--binary', type=str, default='./build/nanochat', help='Path to nanochat binary')
-parser.add_argument('--weights', type=str, default='./weights.bin', help='Path to weights.bin')
-parser.add_argument('--tokenizer', type=str, default='../nanochat-inferonly/weights/tokenizer.pkl')
+parser.add_argument('--binary', type=str, default='../build/nanochat', help='Path to nanochat binary')
+parser.add_argument('--weights', type=str, default='../assets/weights/weights.bin', help='Path to weights.bin')
+parser.add_argument('--tokenizer', type=str, default='../../nanochat-inferonly/weights/weights_karpathy_d34_huggingface/tokenizer.pkl')
 parser.add_argument('--temperature', type=float, default=0.8, help='Default temperature')
 parser.add_argument('--top-k', type=int, default=50, help='Default top-k')
 parser.add_argument('--top-p', type=float, default=0.9, help='Default top-p')

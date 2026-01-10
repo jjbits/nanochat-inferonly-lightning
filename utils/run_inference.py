@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", required=True, help="Path to weights.bin")
     parser.add_argument("--tokenizer", required=True, help="HF tokenizer path")
-    parser.add_argument("--binary", default="./build/nanochat", help="nanochat binary")
+    parser.add_argument("--binary", default="../build/nanochat", help="nanochat binary")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top_p", type=float, default=0.9)

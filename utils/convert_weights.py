@@ -54,6 +54,6 @@ def convert(checkpoint_path: str, output_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint", help="Path to .pt checkpoint")
-    parser.add_argument("-o", "--output", default="weights.bin")
+    parser.add_argument("-o", "--output", default="assets/weights/weights.bin")
     args = parser.parse_args()
     convert(args.checkpoint, args.output)

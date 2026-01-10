@@ -82,6 +82,11 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Debug: print tokens
+    std::cerr << "Prompt tokens (" << prompt_tokens.size() << "): ";
+    for (int t : prompt_tokens) std::cerr << t << " ";
+    std::cerr << "\n";
+
     // Load and run
     Engine engine;
     std::cerr << "Loading weights from " << weights_path << "...\n";

@@ -1,0 +1,4 @@
+[submodule "extern/rustbpe"]
+	path = extern/rustbpe
+	url = https://github.com/jjbits/rustbpe.git
+	branch = c-ffi

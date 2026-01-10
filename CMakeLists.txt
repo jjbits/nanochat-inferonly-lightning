@@ -7,8 +7,17 @@ set(CMAKE_CUDA_ARCHITECTURES 89)
 
 find_package(CUDAToolkit REQUIRED)
 
-# CUTLASS headers only (skip library build)
 include(FetchContent)
+
+# Corrosion for Rust integration
+FetchContent_Declare(
+    Corrosion
+    GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+    GIT_TAG v0.5
+)
+FetchContent_MakeAvailable(Corrosion)
+
+# CUTLASS headers only (skip library build)
 FetchContent_Declare(
     cutlass
     GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
@@ -18,6 +27,29 @@ FetchContent_GetProperties(cutlass)
 if(NOT cutlass_POPULATED)
     FetchContent_Populate(cutlass)
 endif()
+
+# Import rustbpe from submodule
+corrosion_import_crate(MANIFEST_PATH extern/rustbpe/Cargo.toml)
+
+# ============================================================
+# Tokenizer conversion: pkl -> json
+# Only re-runs when tokenizer.pkl changes (no C++ recompile)
+# ============================================================
+set(TOKENIZER_PKL "${CMAKE_SOURCE_DIR}/assets/tokenizer.pkl")
+set(TOKENIZER_JSON "${CMAKE_SOURCE_DIR}/assets/tokenizer.json")
+
+add_custom_command(
+    OUTPUT ${TOKENIZER_JSON}
+    COMMAND ${CMAKE_SOURCE_DIR}/.venv/bin/python
+            ${CMAKE_SOURCE_DIR}/utils/export_tokenizer.py
+            ${TOKENIZER_PKL} ${TOKENIZER_JSON}
+    DEPENDS ${TOKENIZER_PKL} ${CMAKE_SOURCE_DIR}/utils/export_tokenizer.py
+    COMMENT "Converting tokenizer.pkl -> tokenizer.json"
+    VERBATIM
+)
+
+# Standalone target: cmake --build build --target tokenizer
+add_custom_target(tokenizer ALL DEPENDS ${TOKENIZER_JSON})
 
 # Kernel library
 add_library(kernels STATIC
@@ -38,6 +70,9 @@ add_executable(nanochat
     src/engine.cpp
     src/main.cpp
 )
-target_include_directories(nanochat PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(nanochat PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/extern/rustbpe/include
+)
 target_include_directories(nanochat SYSTEM PRIVATE ${cutlass_SOURCE_DIR}/include)
-target_link_libraries(nanochat PRIVATE kernels CUDA::cudart)
+target_link_libraries(nanochat PRIVATE kernels CUDA::cudart rustbpe)

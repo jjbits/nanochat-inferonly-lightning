@@ -23,7 +23,7 @@ bool engine_loaded = false;
 
 // Command line args
 struct ServerArgs {
-    std::string weights_path = "assets/weights/weights.bin";
+    std::string weights_path = "assets/weights.bin";
     std::string tokenizer_path = "assets/tokenizer.json";
     int port = 8000;
     std::string host = "0.0.0.0";
@@ -265,7 +265,7 @@ const char* UI_HTML = R"HTML(<!DOCTYPE html>
 void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [options]\n"
               << "Options:\n"
-              << "  --weights <path>       Path to weights.bin (default: assets/weights/weights.bin)\n"
+              << "  --weights <path>       Path to weights.bin (default: assets/weights.bin)\n"
               << "  --tokenizer <path>     Path to tokenizer.json (default: assets/tokenizer.json)\n"
               << "  --port <int>           Server port (default: 8000)\n"
               << "  --host <str>           Host to bind (default: 0.0.0.0)\n"

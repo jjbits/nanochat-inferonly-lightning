@@ -4,9 +4,6 @@
 #include <cuda_bf16.h>
 #include <cstdio>
 
-// Type alias for activations - use bfloat16 to match training precision
-using act_t = nv_bfloat16;
-
 namespace nanochat {
 
 #define CUDA_CHECK(call)                                                         \

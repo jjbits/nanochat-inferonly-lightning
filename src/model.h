@@ -22,10 +22,6 @@ void residual_add(nv_bfloat16* out, const nv_bfloat16* a, const nv_bfloat16* b, 
 void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M, int N, int K, cudaStream_t stream);
 void gemm_half_residual(nv_bfloat16* D, const nv_bfloat16* A, const nv_bfloat16* B, const nv_bfloat16* residual, int M, int N, int K, cudaStream_t stream);
 
-// Strided attention GEMMs - work directly with [seq, heads, dim] layout, no transpose needed
-void gemm_qk_strided(nv_bfloat16* scores, const nv_bfloat16* Q, const nv_bfloat16* K, int seq_q, int seq_k, int heads, int dim, float scale, cudaStream_t stream);
-void gemm_sv_strided(nv_bfloat16* out, const nv_bfloat16* scores, const nv_bfloat16* V, int seq_q, int seq_k, int heads, int dim, cudaStream_t stream);
-
 // bf16 attention ops (all heads in one kernel)
 void softmax_bf16(nv_bfloat16* out, const nv_bfloat16* x, int rows, int cols, cudaStream_t stream);
 void apply_causal_mask_bf16(nv_bfloat16* scores, int heads, int rows, int cols, int offset, cudaStream_t stream);

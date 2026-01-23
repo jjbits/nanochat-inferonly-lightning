@@ -10,6 +10,7 @@ namespace nanochat {
 
 // GEMM for bf16: C = A @ B^T (row-major A, row-major B, row-major C)
 // A: [M, K], B: [N, K], C: [M, N]
+// Large tiles (128x128) - good for large M (prompt processing)
 using GemmBf16 = cutlass::gemm::device::GemmUniversal<
     cutlass::bfloat16_t,                      // ElementA
     cutlass::layout::RowMajor,                // LayoutA
@@ -29,31 +30,82 @@ using GemmBf16 = cutlass::gemm::device::GemmUniversal<
     3                                         // Stages
 >;
 
+// Small tiles (64x64) - better SM utilization for small M (decode phase)
+using GemmBf16Small = cutlass::gemm::device::GemmUniversal<
+    cutlass::bfloat16_t,                      // ElementA
+    cutlass::layout::RowMajor,                // LayoutA
+    cutlass::bfloat16_t,                      // ElementB
+    cutlass::layout::ColumnMajor,             // LayoutB (transposed row-major)
+    cutlass::bfloat16_t,                      // ElementC
+    cutlass::layout::RowMajor,                // LayoutC
+    float,                                    // ElementAccumulator
+    cutlass::arch::OpClassTensorOp,           // Use tensor cores
+    cutlass::arch::Sm80,                      // Ampere+ (compatible with Ada)
+    cutlass::gemm::GemmShape<64, 64, 32>,     // ThreadblockShape (smaller)
+    cutlass::gemm::GemmShape<32, 32, 32>,     // WarpShape (smaller)
+    cutlass::gemm::GemmShape<16, 8, 16>,      // InstructionShape
+    cutlass::epilogue::thread::LinearCombination<
+        cutlass::bfloat16_t, 4, float, float>,// EpilogueOp (alignment 4 for smaller tiles)
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<8>,
+    3                                         // Stages
+>;
+
 static GemmBf16 gemm_bf16_op;
 static GemmBf16 gemm_bf16_residual_op;
+static GemmBf16Small gemm_bf16_small_op;
+static GemmBf16Small gemm_bf16_small_residual_op;
+
+// Threshold for switching to small tile GEMM
+constexpr int SMALL_M_THRESHOLD = 16;
 
 // C[M,N] = A[M,K] @ B[N,K]^T (bf16 precision)
 void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M, int N, int K, cudaStream_t stream) {
-    typename GemmBf16::Arguments args(
-        cutlass::gemm::GemmUniversalMode::kGemm,
-        {M, N, K},
-        1,  // batch count
-        {1.0f, 0.0f},  // alpha, beta
-        reinterpret_cast<const cutlass::bfloat16_t*>(A),
-        reinterpret_cast<const cutlass::bfloat16_t*>(B),
-        reinterpret_cast<cutlass::bfloat16_t*>(C),
-        reinterpret_cast<cutlass::bfloat16_t*>(C),
-        M * K,  // batch stride A
-        N * K,  // batch stride B
-        M * N,  // batch stride C
-        M * N,  // batch stride D
-        K,      // lda
-        K,      // ldb
-        N,      // ldc
-        N       // ldd
-    );
+    cutlass::Status status;
 
-    cutlass::Status status = gemm_bf16_op(args, nullptr, stream);
+    if (M <= SMALL_M_THRESHOLD) {
+        // Use smaller tiles for better SM utilization at small M
+        typename GemmBf16Small::Arguments args(
+            cutlass::gemm::GemmUniversalMode::kGemm,
+            {M, N, K},
+            1,  // batch count
+            {1.0f, 0.0f},  // alpha, beta
+            reinterpret_cast<const cutlass::bfloat16_t*>(A),
+            reinterpret_cast<const cutlass::bfloat16_t*>(B),
+            reinterpret_cast<cutlass::bfloat16_t*>(C),
+            reinterpret_cast<cutlass::bfloat16_t*>(C),
+            M * K,  // batch stride A
+            N * K,  // batch stride B
+            M * N,  // batch stride C
+            M * N,  // batch stride D
+            K,      // lda
+            K,      // ldb
+            N,      // ldc
+            N       // ldd
+        );
+        status = gemm_bf16_small_op(args, nullptr, stream);
+    } else {
+        // Use large tiles for better throughput at large M
+        typename GemmBf16::Arguments args(
+            cutlass::gemm::GemmUniversalMode::kGemm,
+            {M, N, K},
+            1,  // batch count
+            {1.0f, 0.0f},  // alpha, beta
+            reinterpret_cast<const cutlass::bfloat16_t*>(A),
+            reinterpret_cast<const cutlass::bfloat16_t*>(B),
+            reinterpret_cast<cutlass::bfloat16_t*>(C),
+            reinterpret_cast<cutlass::bfloat16_t*>(C),
+            M * K,  // batch stride A
+            N * K,  // batch stride B
+            M * N,  // batch stride C
+            M * N,  // batch stride D
+            K,      // lda
+            K,      // ldb
+            N,      // ldc
+            N       // ldd
+        );
+        status = gemm_bf16_op(args, nullptr, stream);
+    }
+
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "CUTLASS GEMM bf16 failed\n");
     }
@@ -62,26 +114,52 @@ void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M
 // D[M,N] = A[M,K] @ B[N,K]^T + residual[M,N] (fused residual add)
 void gemm_half_residual(nv_bfloat16* D, const nv_bfloat16* A, const nv_bfloat16* B,
                         const nv_bfloat16* residual, int M, int N, int K, cudaStream_t stream) {
-    typename GemmBf16::Arguments args(
-        cutlass::gemm::GemmUniversalMode::kGemm,
-        {M, N, K},
-        1,  // batch count
-        {1.0f, 1.0f},  // alpha=1, beta=1: D = 1*A@B^T + 1*residual
-        reinterpret_cast<const cutlass::bfloat16_t*>(A),
-        reinterpret_cast<const cutlass::bfloat16_t*>(B),
-        reinterpret_cast<const cutlass::bfloat16_t*>(residual),  // C = residual (read)
-        reinterpret_cast<cutlass::bfloat16_t*>(D),               // D = output (write)
-        M * K,  // batch stride A
-        N * K,  // batch stride B
-        M * N,  // batch stride C
-        M * N,  // batch stride D
-        K,      // lda
-        K,      // ldb
-        N,      // ldc
-        N       // ldd
-    );
+    cutlass::Status status;
 
-    cutlass::Status status = gemm_bf16_residual_op(args, nullptr, stream);
+    if (M <= SMALL_M_THRESHOLD) {
+        // Use smaller tiles for better SM utilization at small M
+        typename GemmBf16Small::Arguments args(
+            cutlass::gemm::GemmUniversalMode::kGemm,
+            {M, N, K},
+            1,  // batch count
+            {1.0f, 1.0f},  // alpha=1, beta=1: D = 1*A@B^T + 1*residual
+            reinterpret_cast<const cutlass::bfloat16_t*>(A),
+            reinterpret_cast<const cutlass::bfloat16_t*>(B),
+            reinterpret_cast<const cutlass::bfloat16_t*>(residual),  // C = residual (read)
+            reinterpret_cast<cutlass::bfloat16_t*>(D),               // D = output (write)
+            M * K,  // batch stride A
+            N * K,  // batch stride B
+            M * N,  // batch stride C
+            M * N,  // batch stride D
+            K,      // lda
+            K,      // ldb
+            N,      // ldc
+            N       // ldd
+        );
+        status = gemm_bf16_small_residual_op(args, nullptr, stream);
+    } else {
+        // Use large tiles for better throughput at large M
+        typename GemmBf16::Arguments args(
+            cutlass::gemm::GemmUniversalMode::kGemm,
+            {M, N, K},
+            1,  // batch count
+            {1.0f, 1.0f},  // alpha=1, beta=1: D = 1*A@B^T + 1*residual
+            reinterpret_cast<const cutlass::bfloat16_t*>(A),
+            reinterpret_cast<const cutlass::bfloat16_t*>(B),
+            reinterpret_cast<const cutlass::bfloat16_t*>(residual),  // C = residual (read)
+            reinterpret_cast<cutlass::bfloat16_t*>(D),               // D = output (write)
+            M * K,  // batch stride A
+            N * K,  // batch stride B
+            M * N,  // batch stride C
+            M * N,  // batch stride D
+            K,      // lda
+            K,      // ldb
+            N,      // ldc
+            N       // ldd
+        );
+        status = gemm_bf16_residual_op(args, nullptr, stream);
+    }
+
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "CUTLASS GEMM bf16 residual failed\n");
     }

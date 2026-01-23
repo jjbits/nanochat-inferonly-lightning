@@ -2,7 +2,7 @@
 
 High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/nanochat) for a 2.1B parameter GPT-style transformer. Converted from [nanochat-inferonly](https://github.com/jjbits/nanochat-inferonly) (Python/PyTorch) with custom CUDA kernels and CUTLASS GEMMs.
 
-**22% faster than PyTorch implementaion(nanochat-inferonly)** — 51.5 tok/s vs 42.2 tok/s on RTX 4090.
+**2.56x faster than PyTorch implementation (nanochat-inferonly)** — 108 tok/s vs 42.2 tok/s on RTX 4090.
 
 ## Model Architecture
 
@@ -18,6 +18,35 @@ High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/
 | Vocab Size | 65,536 |
 
 **Features:** RoPE, RMSNorm, ReLU², QK-norm, soft-capped logits
+
+## Forward Pass
+
+```
+tokens
+   ↓
+embedding → x [seq, 2176]
+   ↓
+rmsnorm (in-place)
+   ↓
+┌─────────────── Layer 0-33 ───────────────┐
+│  x → rmsnorm → x_norm                    │
+│  x_norm → Q, K, V (GEMM)                 │
+│  Q, K → RoPE + QK-norm (fused)           │
+│  K, V → append to cache                  │
+│  Q, K_cache, V_cache → Flash Attention   │
+│  attn_out → O projection + residual → x  │
+│  x → rmsnorm → x_norm                    │
+│  x_norm → MLP up → ReLU² → MLP down + x  │
+└──────────────────────────────────────────┘
+   ↓
+rmsnorm → x_norm
+   ↓
+lm_head (GEMM) → logits [seq, 65536]
+   ↓
+tanh_cap
+   ↓
+logits[-1] → output
+```
 
 ## Implementation Approach
 
@@ -41,6 +70,7 @@ High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/
 | **Residual + GEMM** | `x = x + proj(y)` | CUTLASS epilogue fusion | Saves 68 kernel launches/forward |
 | **Causal mask + softmax** | 2 separate ops | 1 fused kernel | Saves 34 kernel launches/forward |
 | **QKV layout** | Transpose → contiguous → GEMM | Strided GEMM | Eliminated 5.8M memcpy calls |
+| **Small-M GEMM** | Fixed 128×128 tiles | Adaptive 64×64 tiles for decode | 2x+ speedup for seq_len=1 |
 | **Precision** | Mixed with conversions | bf16 throughout | No type conversion overhead |
 | **Runtime** | Python + PyTorch | Direct CUDA calls | Lower latency per op |
 | **Tokenizer** | tiktoken (Python) | rustbpe C FFI | No Python at runtime |
@@ -56,10 +86,10 @@ High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/
 
 | Metric | Python | C++ |
 |--------|--------|-----|
-| Inference (50 tokens) | 1.18s | **0.99s** |
-| Speed | 42.2 tok/s | **51.5 tok/s** |
-| Total (with load) | 8.9s | **~6s** |
-| vs Python | baseline | **22% faster** |
+| Inference (50 tokens) | 1.18s | **0.46s** |
+| Speed | 42.2 tok/s | **108 tok/s** |
+| Total (with load) | 8.9s | **~5.5s** |
+| vs Python | baseline | **2.56x faster** |
 
 ## Project Structure
 

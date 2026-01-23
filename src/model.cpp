@@ -46,6 +46,7 @@ void ScratchBuffers::allocate(int max_seq) {
     scores.allocate(N_HEAD * max_seq * SEQ_LEN);
     scores_softmax.allocate(N_HEAD * max_seq * SEQ_LEN);
     logits.allocate(max_seq * VOCAB_SIZE);
+    tokens.allocate(max_seq);
 }
 
 void KVCache::allocate(int max_seq) {
@@ -153,11 +154,10 @@ void Model::mlp(int layer, int seq_len) {
 }
 
 void Model::forward(const int* tokens, int seq_len, int start_pos, nv_bfloat16* logits_out) {
-    Tensor<int> d_tokens;
-    d_tokens.allocate(seq_len);
-    CUDA_CHECK(cudaMemcpyAsync(d_tokens.data, tokens, seq_len * sizeof(int), cudaMemcpyHostToDevice, stream));
+    scratch.tokens.allocate(seq_len);  // Reuses buffer if same size
+    CUDA_CHECK(cudaMemcpyAsync(scratch.tokens.data, tokens, seq_len * sizeof(int), cudaMemcpyHostToDevice, stream));
 
-    embedding(scratch.x.data, weights.embed_weight.data, d_tokens.data, seq_len, N_EMBD, stream);
+    embedding(scratch.x.data, weights.embed_weight.data, scratch.tokens.data, seq_len, N_EMBD, stream);
 
     // RMSNorm after embedding
     rmsnorm(scratch.x.data, scratch.x.data, seq_len, N_EMBD, stream);
@@ -183,11 +183,10 @@ void Model::forward(const int* tokens, int seq_len, int start_pos, nv_bfloat16* 
 }
 
 void Model::forward_all(const int* tokens, int seq_len, float* logits_out) {
-    Tensor<int> d_tokens;
-    d_tokens.allocate(seq_len);
-    CUDA_CHECK(cudaMemcpyAsync(d_tokens.data, tokens, seq_len * sizeof(int), cudaMemcpyHostToDevice, stream));
+    scratch.tokens.allocate(seq_len);  // Reuses buffer if same size
+    CUDA_CHECK(cudaMemcpyAsync(scratch.tokens.data, tokens, seq_len * sizeof(int), cudaMemcpyHostToDevice, stream));
 
-    embedding(scratch.x.data, weights.embed_weight.data, d_tokens.data, seq_len, N_EMBD, stream);
+    embedding(scratch.x.data, weights.embed_weight.data, scratch.tokens.data, seq_len, N_EMBD, stream);
 
     // RMSNorm after embedding
     rmsnorm(scratch.x.data, scratch.x.data, seq_len, N_EMBD, stream);

@@ -62,6 +62,7 @@ struct ScratchBuffers {
     Tensor<nv_bfloat16> scores;         // [n_heads, seq, kv_len]
     Tensor<nv_bfloat16> scores_softmax;
     Tensor<nv_bfloat16> logits;          // [seq, vocab_size]
+    Tensor<int> tokens;                  // [seq] - pre-allocated for forward
     void allocate(int max_seq);
 };
 

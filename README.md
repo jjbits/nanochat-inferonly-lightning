@@ -75,6 +75,8 @@ logits[-1] → output
 | **Runtime** | Python + PyTorch | Direct CUDA calls | Lower latency per op |
 | **Tokenizer** | tiktoken (Python) | rustbpe C FFI | No Python at runtime |
 
+Extra post-implementation optimization, through profiling, results: [PROFILING.md](PROFILING.md)
+
 ### Kernel Launch Reduction
 
 | Version | Kernels per Forward |

@@ -53,6 +53,7 @@ public:
     }
 
     void allocate(size_t n) {
+        if (size == n && data) return;  // Reuse existing buffer
         if (data) cudaFree(data);
         size = n;
         CUDA_CHECK(cudaMalloc(&data, n * sizeof(T)));

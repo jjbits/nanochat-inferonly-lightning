@@ -87,6 +87,8 @@ public:
     ~Model();
     void load(const std::string& weights_path);
     void forward(const int* tokens, int seq_len, int start_pos, nv_bfloat16* logits_out);
+    // Evaluation: returns logits for ALL positions as float [seq_len * vocab_size]
+    void forward_all(const int* tokens, int seq_len, float* logits_out);
 
 private:
     void attention(int layer, int seq_len, int start_pos);

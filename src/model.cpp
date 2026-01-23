@@ -182,4 +182,42 @@ void Model::forward(const int* tokens, int seq_len, int start_pos, nv_bfloat16* 
     CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
+void Model::forward_all(const int* tokens, int seq_len, float* logits_out) {
+    Tensor<int> d_tokens;
+    d_tokens.allocate(seq_len);
+    CUDA_CHECK(cudaMemcpyAsync(d_tokens.data, tokens, seq_len * sizeof(int), cudaMemcpyHostToDevice, stream));
+
+    embedding(scratch.x.data, weights.embed_weight.data, d_tokens.data, seq_len, N_EMBD, stream);
+
+    // RMSNorm after embedding
+    rmsnorm(scratch.x.data, scratch.x.data, seq_len, N_EMBD, stream);
+
+    // Always start at position 0 for evaluation (no KV cache accumulation)
+    const int start_pos = 0;
+    for (int i = 0; i < N_LAYER; i++) {
+        attention(i, seq_len, start_pos);
+        mlp(i, seq_len);
+    }
+
+    // Final RMSNorm
+    rmsnorm(scratch.x_norm.data, scratch.x.data, seq_len, N_EMBD, stream);
+
+    // LM head: x[seq,n_embd] @ W[vocab_size,n_embd]^T = logits[seq,vocab_size]
+    gemm_half(scratch.logits.data, scratch.x_norm.data, weights.lm_head.data, seq_len, VOCAB_SIZE, N_EMBD, stream);
+
+    // Soft cap logits
+    tanh_cap(scratch.logits.data, seq_len * VOCAB_SIZE, LOGIT_CAP, stream);
+
+    // Copy all logits to host and convert bf16 -> float
+    std::vector<nv_bfloat16> logits_bf16(seq_len * VOCAB_SIZE);
+    CUDA_CHECK(cudaMemcpyAsync(logits_bf16.data(), scratch.logits.data,
+                                seq_len * VOCAB_SIZE * sizeof(nv_bfloat16),
+                                cudaMemcpyDeviceToHost, stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+
+    for (int i = 0; i < seq_len * VOCAB_SIZE; i++) {
+        logits_out[i] = __bfloat162float(logits_bf16[i]);
+    }
+}
+
 }  // namespace nanochat

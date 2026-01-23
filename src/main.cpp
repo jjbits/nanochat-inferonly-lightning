@@ -1,9 +1,11 @@
 #include "engine.h"
+#include "model.h"
 #include "tokenizer.h"
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
 #include <chrono>
+#include <cstdio>
 
 using namespace nanochat;
 
@@ -16,8 +18,14 @@ void print_usage(const char* prog) {
               << "  --top_p <float>        Top-p sampling (default: 0.9)\n"
               << "  --top_k <int>          Top-k sampling (default: 50)\n"
               << "  --max_tokens <int>     Max tokens to generate (default: 256)\n"
+              << "  --eval                 Evaluation mode: read tokens from stdin, output logits\n"
               << "\n"
-              << "Without --prompt, reads space-separated token IDs from stdin.\n";
+              << "Without --prompt, reads space-separated token IDs from stdin.\n"
+              << "\n"
+              << "Eval mode protocol:\n"
+              << "  Input:  seq_len (4 bytes int32) + tokens (seq_len * 4 bytes int32)\n"
+              << "  Output: logits (seq_len * vocab_size * 4 bytes float32)\n"
+              << "  Send seq_len=0 to exit.\n";
 }
 
 int main(int argc, char** argv) {
@@ -30,6 +38,7 @@ int main(int argc, char** argv) {
     std::string tokenizer_path;
     std::string prompt;
     SamplingParams params;
+    bool eval_mode = false;
 
     // Parse args
     for (int i = 2; i < argc; i++) {
@@ -46,10 +55,73 @@ int main(int argc, char** argv) {
             params.top_k = std::atoi(argv[++i]);
         } else if (arg == "--max_tokens" && i + 1 < argc) {
             params.max_tokens = std::atoi(argv[++i]);
+        } else if (arg == "--eval") {
+            eval_mode = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
         }
+    }
+
+    // Evaluation mode: compute loss for continuation tokens
+    if (eval_mode) {
+        Model model;
+        std::cerr << "Loading weights from " << weights_path << "...\n";
+        model.load(weights_path);
+        std::cerr << "Loaded. Ready for evaluation.\n";
+
+        // Protocol: read seq_len, cont_start, tokens; write avg_loss, num_correct, num_tokens
+        while (true) {
+            int32_t seq_len, cont_start;
+            if (fread(&seq_len, sizeof(int32_t), 1, stdin) != 1) break;
+            if (seq_len <= 0) break;
+            if (fread(&cont_start, sizeof(int32_t), 1, stdin) != 1) break;
+
+            std::vector<int> tokens(seq_len);
+            if (fread(tokens.data(), sizeof(int32_t), seq_len, stdin) != (size_t)seq_len) break;
+
+            std::vector<float> logits(seq_len * VOCAB_SIZE);
+            model.forward_all(tokens.data(), seq_len, logits.data());
+
+            // Compute cross-entropy loss and argmax accuracy over continuation tokens
+            // Loss at position i predicts token i+1
+            double total_loss = 0.0;
+            int32_t num_tokens = 0;
+            int32_t num_correct = 0;
+            for (int i = cont_start - 1; i < seq_len - 1; i++) {
+                int target = tokens[i + 1];
+                float* logits_row = &logits[i * VOCAB_SIZE];
+
+                // Find max logit and argmax
+                float max_logit = logits_row[0];
+                int argmax = 0;
+                for (int j = 1; j < VOCAB_SIZE; j++) {
+                    if (logits_row[j] > max_logit) {
+                        max_logit = logits_row[j];
+                        argmax = j;
+                    }
+                }
+
+                // Count correct predictions
+                if (argmax == target) num_correct++;
+
+                // Numerically stable cross-entropy
+                double sum_exp = 0.0;
+                for (int j = 0; j < VOCAB_SIZE; j++) {
+                    sum_exp += std::exp(logits_row[j] - max_logit);
+                }
+                double log_prob = (logits_row[target] - max_logit) - std::log(sum_exp);
+                total_loss -= log_prob;
+                num_tokens++;
+            }
+
+            float avg_loss = (num_tokens > 0) ? (float)(total_loss / num_tokens) : 0.0f;
+            fwrite(&avg_loss, sizeof(float), 1, stdout);
+            fwrite(&num_correct, sizeof(int32_t), 1, stdout);
+            fwrite(&num_tokens, sizeof(int32_t), 1, stdout);
+            fflush(stdout);
+        }
+        return 0;
     }
 
     std::vector<int> prompt_tokens;

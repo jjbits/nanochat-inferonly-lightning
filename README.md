@@ -91,6 +91,24 @@ logits[-1] → output
 | Total (with load) | 8.9s | **~5.5s** |
 | vs Python | baseline | **2.56x faster** |
 
+### Model Validation (CORE Benchmark)
+
+Validated implementation correctness using the [CORE benchmark](https://arxiv.org/abs/2406.11794) (HellaSwag, PIQA, ARC, WinoGrande, etc.):
+
+| Implementation | CORE Score |
+|----------------|------------|
+| **C++ (this repo)** | **0.3630** |
+| Python (nanochat) | 0.2219 |
+
+Run evaluation:
+```bash
+# Install dependencies
+uv pip install tiktoken pyyaml numpy
+
+# Run CORE benchmark (100 examples per task, ~5 min)
+.venv/bin/python utils/eval_core.py --max-per-task 100
+```
+
 ## Project Structure
 
 ```

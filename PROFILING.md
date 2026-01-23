@@ -123,3 +123,37 @@ void allocate(size_t n) {
 ```
 
 Fixed, though impact is minimal (allocations dominated by startup).
+
+## End-to-End Breakdown
+
+### Time Distribution by Operation
+
+| Operation | GPU Time | % Total |
+|-----------|----------|---------|
+| **Attention GEMM** (QKV + O) | 595 ms | **64.3%** |
+| **MLP GEMM** (up + down) | 298 ms | **32.2%** |
+| Flash Attention | 12 ms | 1.3% |
+| RMSNorm | 9 ms | 1.0% |
+| RoPE + RMSNorm | 5 ms | 0.6% |
+| ReLU² | 2 ms | 0.2% |
+| Other | <1 ms | <0.1% |
+
+### GEMM Breakdown (205 calls per token)
+
+| GEMM Type | Calls/token | % of GEMM |
+|-----------|-------------|-----------|
+| QKV projection | 102 (3×34) | 49.8% |
+| O projection | 34 | 16.6% |
+| MLP up | 34 | 16.6% |
+| MLP down | 34 | 16.6% |
+| LM head | 1 | 0.5% |
+
+### Amdahl's Law
+
+**GEMM is 97% of GPU time.** Optimizing non-GEMM kernels has diminishing returns:
+
+| If you optimize... | Max possible speedup |
+|--------------------|--------------------|
+| GEMM | Up to 33x (theoretical) |
+| Flash Attention | 1.3% |
+| All non-GEMM | 3.1% |

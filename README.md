@@ -67,11 +67,10 @@ logits[-1] → output [65536]
 ## Implementation Approach
 
 **Custom CUDA kernels** for simple ops with full control:
-- RMSNorm, RoPE, Softmax, Embedding, ReLU², Tanh cap
+- RMSNorm, RoPE, Embedding, ReLU², Tanh cap
 
 **CUTLASS** for matrix multiplications with fusion:
 - Epilogue fusion for residual adds (`D = A @ B + residual` in one kernel)
-- Strided batched GEMM for attention (no transpose needed)
 
 **rustbpe** for tokenization:
 - BPE tokenizer via C FFI
@@ -84,8 +83,6 @@ logits[-1] → output [65536]
 | **Attention** | PyTorch SDPA | Custom Flash Attention with online softmax, multi-warp | Fuses Q@K + mask + softmax + @V into single kernel |
 | **RoPE + QK-norm** | 4 separate ops | 1 fused kernel | Saves 68 kernel launches/forward |
 | **Residual + GEMM** | `x = x + proj(y)` | CUTLASS epilogue fusion | Saves 68 kernel launches/forward |
-| **Causal mask + softmax** | 2 separate ops | 1 fused kernel | Saves 34 kernel launches/forward |
-| **QKV layout** | Transpose → contiguous → GEMM | Strided GEMM | Eliminated 5.8M memcpy calls |
 | **Small-M GEMM** | Fixed 128×128 tiles | Adaptive 64×64 tiles for decode | 2x+ speedup for seq_len=1 |
 | **Precision** | Mixed with conversions | bf16 throughout | No type conversion overhead |
 | **Runtime** | Python + PyTorch | Direct CUDA calls | Lower latency per op |
@@ -141,7 +138,6 @@ nanochat-inferonly-lightning/
 ├── kernels/
 │   ├── rmsnorm.cu        # RMSNorm kernel
 │   ├── rope.cu           # RoPE + fused RoPE/RMSNorm
-│   ├── attention.cu      # Softmax, causal mask
 │   ├── flash_attention.cu# Custom Flash Attention
 │   ├── ops.cu            # Embedding, ReLU², tanh cap
 │   └── gemm.cu           # CUTLASS GEMM wrappers

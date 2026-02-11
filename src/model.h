@@ -22,11 +22,6 @@ void residual_add(nv_bfloat16* out, const nv_bfloat16* a, const nv_bfloat16* b, 
 void gemm_half(nv_bfloat16* C, const nv_bfloat16* A, const nv_bfloat16* B, int M, int N, int K, cudaStream_t stream);
 void gemm_half_residual(nv_bfloat16* D, const nv_bfloat16* A, const nv_bfloat16* B, const nv_bfloat16* residual, int M, int N, int K, cudaStream_t stream);
 
-// bf16 attention ops (all heads in one kernel)
-void softmax_bf16(nv_bfloat16* out, const nv_bfloat16* x, int rows, int cols, cudaStream_t stream);
-void apply_causal_mask_bf16(nv_bfloat16* scores, int heads, int rows, int cols, int offset, cudaStream_t stream);
-void causal_softmax_bf16(nv_bfloat16* out, const nv_bfloat16* scores, int heads, int seq_q, int kv_len, int offset, cudaStream_t stream);
-
 // Flash Attention: fused Q@K^T + causal mask + softmax + @V
 void flash_attention(nv_bfloat16* out, const nv_bfloat16* Q, const nv_bfloat16* K, const nv_bfloat16* V,
                      int seq_q, int kv_len, int heads, float scale, int kv_offset, cudaStream_t stream);

@@ -71,7 +71,6 @@ add_custom_target(tokenizer ALL DEPENDS ${TOKENIZER_JSON})
 add_library(kernels STATIC
     kernels/rmsnorm.cu
     kernels/rope.cu
-    kernels/attention.cu
     kernels/flash_attention.cu
     kernels/ops.cu
     kernels/gemm.cu

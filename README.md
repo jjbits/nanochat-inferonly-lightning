@@ -1,6 +1,6 @@
 # nanochat-inferonly-lightning
 
-High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/nanochat) for a 2.1B parameter GPT-style transformer. Converted from [nanochat-inferonly](https://github.com/jjbits/nanochat-inferonly) (Python/PyTorch) with custom CUDA kernels and CUTLASS GEMMs.
+High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/nanochat) for a 2.2B parameter GPT-style transformer. Converted from [nanochat-inferonly](https://github.com/jjbits/nanochat-inferonly) (Python/PyTorch) with custom CUDA kernels and CUTLASS GEMMs.
 
 **2.56x faster than PyTorch implementation (nanochat-inferonly)** — 108 tok/s vs 42.2 tok/s on RTX 4090.
 
@@ -8,7 +8,7 @@ High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/
 
 | Parameter | Value |
 |-----------|-------|
-| Parameters | ~2.1B (8GB bf16) |
+| Parameters | ~2.2B (4GB bf16) |
 | Layers | 34 |
 | Attention Heads | 17 |
 | Embedding Dim | 2176 |
@@ -22,30 +22,46 @@ High-performance inference only C++/CUDA [Nanochat](https://github.com/karpathy/
 ## Forward Pass
 
 ```
-tokens
+tokens [seq]
    ↓
 embedding → x [seq, 2176]
    ↓
-rmsnorm (in-place)
+rmsnorm(x) [seq, 2176] (in-place)
    ↓
-┌─────────────── Layer 0-33 ───────────────┐
-│  x → rmsnorm → x_norm                    │
-│  x_norm → Q, K, V (GEMM)                 │
-│  Q, K → RoPE + QK-norm (fused)           │
-│  K, V → append to cache                  │
-│  Q, K_cache, V_cache → Flash Attention   │
-│  attn_out → O projection + residual → x  │
-│  x → rmsnorm → x_norm                    │
-│  x_norm → MLP up → ReLU² → MLP down + x  │
-└──────────────────────────────────────────┘
+┌───────────────────── Layer 0-33 ─────────────────────┐
+│                                                      │
+│  ┌─ Attention ────────────────────────────────────┐  │
+│  │  rmsnorm(x) → x_norm [seq, 2176]               │  │
+│  │  x_norm × Wq → Q [seq, 17, 128]                │  │
+│  │  x_norm × Wk → K [seq, 17, 128]                │  │
+│  │  x_norm × Wv → V [seq, 17, 128]                │  │
+│  │  Q → RoPE → RMSNorm → Q [seq, 17, 128]         │  │
+│  │  K → RoPE → RMSNorm → K [seq, 17, 128]         │  │
+│  │  K → append to K cache [kv_len, 17, 128]       │  │
+│  │  V → append to V cache [kv_len, 17, 128]       │  │
+│  │  Q, K_cache, V_cache →                         │  │
+│  │       Flash Attention → attn_out [seq, 2176]   │  │
+│  │  attn_out × Wo → proj [seq, 2176]              │  │
+│  └────────────────────────────────────────────────┘  │
+│  x = proj + x [seq, 2176] (residual)                 │
+│                                                      │
+│  ┌─ MLP ──────────────────────────────────────────┐  │
+│  │  rmsnorm(x) → x_norm [seq, 2176]               │  │
+│  │  x_norm × W_up → hidden [seq, 8704]            │  │
+│  │  ReLU²(hidden) [seq, 8704]                     │  │
+│  │  hidden × W_down → mlp_out [seq, 2176]         │  │
+│  └────────────────────────────────────────────────┘  │
+│  x = mlp_out + x [seq, 2176] (residual)              │
+│                                                      │
+└──────────────────────────────────────────────────────┘
    ↓
-rmsnorm → x_norm
+rmsnorm(x) → x_norm [seq, 2176]
    ↓
-lm_head (GEMM) → logits [seq, 65536]
+x_norm × W_lm_head → logits [seq, 65536]
    ↓
-tanh_cap
+tanh_cap(logits) [seq, 65536]
    ↓
-logits[-1] → output
+logits[-1] → output [65536]
 ```
 
 ## Implementation Approach
